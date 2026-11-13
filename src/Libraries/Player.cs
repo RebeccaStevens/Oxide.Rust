@@ -1,9 +1,13 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+using Facepunch;
+using Network;
 using Oxide.Core;
 using Oxide.Core.Libraries;
 using Oxide.Core.Libraries.Covalence;
-using System;
-using System.Globalization;
-using System.Text.RegularExpressions;
 using UnityEngine;
 
 namespace Oxide.Game.Rust.Libraries
@@ -23,7 +27,19 @@ namespace Oxide.Game.Rust.Libraries
         /// <summary>
         /// Gets the player's language
         /// </summary>
-        public CultureInfo Language(BasePlayer player) => CultureInfo.GetCultureInfo(player.net.connection.info.GetString("global.language") ?? "en");
+        public CultureInfo Language(BasePlayer player)
+        {
+            CultureInfo cultureInfo;
+            try
+            {
+                cultureInfo = CultureInfo.GetCultureInfo(player.net.connection.language ?? "en");
+            }
+            catch (CultureNotFoundException)
+            {
+                cultureInfo = CultureInfo.GetCultureInfo("en");
+            }
+            return cultureInfo;
+        }
 
         /// <summary>
         /// Gets the player's IP address
@@ -48,7 +64,7 @@ namespace Oxide.Game.Rust.Libraries
         /// <summary>
         /// Returns if the player is admin
         /// </summary>
-        public bool IsAdmin(ulong id) => ServerUsers.Is(id, ServerUsers.UserGroup.Owner);
+        public bool IsAdmin(ulong id) => ServerUsers.Is(id, ServerUsers.UserGroup.Owner) || DeveloperList.Contains(id);
 
         /// <summary>
         /// Returns if the player is admin
@@ -104,7 +120,8 @@ namespace Oxide.Game.Rust.Libraries
         /// </summary>
         /// <param name="id"></param>
         /// <param name="reason"></param>
-        public void Ban(ulong id, string reason = "")
+        /// <param name="expiry"></param>
+        public void Ban(ulong id, string reason = "", long expiry = -1L)
         {
             if (IsBanned(id))
             {
@@ -112,7 +129,7 @@ namespace Oxide.Game.Rust.Libraries
             }
 
             BasePlayer player = FindById(id);
-            ServerUsers.Set(id, ServerUsers.UserGroup.Banned, player?.displayName ?? "Unknown", reason);
+            ServerUsers.Set(id, ServerUsers.UserGroup.Banned, player?.displayName ?? "Unknown", reason, expiry);
             ServerUsers.Save();
             if (player != null && IsConnected(player))
             {
@@ -125,14 +142,16 @@ namespace Oxide.Game.Rust.Libraries
         /// </summary>
         /// <param name="id"></param>
         /// <param name="reason"></param>
-        public void Ban(string id, string reason = "") => Ban(Convert.ToUInt64(id), reason);
+        /// <param name="expiry"></param>
+        public void Ban(string id, string reason = "", long expiry = -1L) => Ban(Convert.ToUInt64(id), reason, expiry);
 
         /// <summary>
         /// Bans the player from the server
         /// </summary>
         /// <param name="player"></param>
         /// <param name="reason"></param>
-        public void Ban(BasePlayer player, string reason = "") => Ban(player.UserIDString, reason);
+        /// <param name="expiry"></param>
+        public void Ban(BasePlayer player, string reason = "", long expiry = -1L) => Ban(player.UserIDString, reason, expiry);
 
         /// <summary>
         /// Heals the player by specified amount
@@ -170,6 +189,7 @@ namespace Oxide.Game.Rust.Libraries
         {
             name = string.IsNullOrEmpty(name.Trim()) ? player.displayName : name;
 
+            ServerMgr.Instance.persistance.SetPlayerName(player.userID, name);
             player.net.connection.username = name;
             player.displayName = name;
             player._name = name;
@@ -178,7 +198,41 @@ namespace Oxide.Game.Rust.Libraries
             player.IPlayer.Name = name;
             permission.UpdateNickname(player.UserIDString, name);
 
-            Teleport(player, player.transform.position);
+            if (player.net.group == BaseNetworkable.LimboNetworkGroup)
+            {
+                return;
+            }
+
+            List<Connection> connections = Pool.Get<List<Connection>>();
+
+            for (int i = 0; i < Net.sv.connections.Count; i++)
+            {
+                Connection conn = Net.sv.connections[i];
+
+                if (conn.connected && conn.isAuthenticated && conn.player is BasePlayer && conn.player != player)
+                {
+                    connections.Add(conn);
+                }
+            }
+
+            player.OnNetworkSubscribersLeave(connections);
+            Pool.FreeUnmanaged(ref connections);
+
+            if (player.limitNetworking)
+            {
+                return;
+            }
+
+            player.syncPosition = false;
+            player._limitedNetworking = true;
+
+            Interface.Oxide.NextTick(() =>
+            {
+                player.syncPosition = true;
+                player._limitedNetworking = false;
+                player.UpdateNetworkGroup();
+                player.SendNetworkUpdate();
+            });
         }
 
         /// <summary>
@@ -200,11 +254,11 @@ namespace Oxide.Game.Rust.Libraries
                     //player.SetPlayerFlag(BasePlayer.PlayerFlags.ReceivingSnapshot, true);
                     //player.UpdatePlayerCollider(true);
                     //player.UpdatePlayerRigidbody(false);
-                    player.EnableServerFall(true);
+                    player.SetServerFall(true);
 
                     // Teleport the player to position
                     player.MovePosition(destination);
-                    player.ClientRPCPlayer(null, player, "ForcePositionTo", destination);
+                    player.ClientRPC(RpcTarget.Player("ForcePositionTo", player), destination);
 
                     // Update network group if outside current group
                     /*if (!player.net.sv.visibility.IsInside(player.net.group, destination))
@@ -220,7 +274,7 @@ namespace Oxide.Game.Rust.Libraries
                     // Restore player behavior
                     //player.UpdatePlayerCollider(true);
                     //player.UpdatePlayerRigidbody(true);
-                    player.EnableServerFall(false);
+                    player.SetServerFall(false);
                 }
             }
         }
@@ -368,6 +422,10 @@ namespace Oxide.Game.Rust.Libraries
 
             message = args.Length > 0 ? string.Format(Formatter.ToUnity(message), args) : Formatter.ToUnity(message);
             string formatted = prefix != null ? $"{prefix} {message}" : message;
+            if (Interface.CallHook("OnMessagePlayer", formatted, player, userId) != null)
+            {
+                return;
+            }
             player.SendConsoleCommand("chat.add", 2, userId, formatted);
         }
 
@@ -418,30 +476,28 @@ namespace Oxide.Game.Rust.Libraries
         /// <param name="itemId"></param>
         public void DropItem(BasePlayer player, int itemId)
         {
-            Vector3 position = player.transform.position;
             PlayerInventory inventory = Inventory(player);
-            for (int s = 0; s < inventory.containerMain.capacity; s++)
+
+            using (PooledList<global::Item> items = Pool.Get<PooledList<global::Item>>())
             {
-                global::Item i = inventory.containerMain.GetSlot(s);
-                if (i.info.itemid == itemId)
+                if (inventory.containerMain != null)
                 {
-                    i.Drop(position + new Vector3(0f, 1f, 0f) + position / 2f, (position + new Vector3(0f, 0.2f, 0f)) * 8f);
+                    inventory.containerMain.FindItemsByItemID(items, itemId);
                 }
-            }
-            for (int s = 0; s < inventory.containerBelt.capacity; s++)
-            {
-                global::Item i = inventory.containerBelt.GetSlot(s);
-                if (i.info.itemid == itemId)
+
+                if (inventory.containerBelt != null)
                 {
-                    i.Drop(position + new Vector3(0f, 1f, 0f) + position / 2f, (position + new Vector3(0f, 0.2f, 0f)) * 8f);
+                    inventory.containerBelt.FindItemsByItemID(items, itemId);
                 }
-            }
-            for (int s = 0; s < inventory.containerWear.capacity; s++)
-            {
-                global::Item i = inventory.containerWear.GetSlot(s);
-                if (i.info.itemid == itemId)
+
+                if (inventory.containerWear != null)
                 {
-                    i.Drop(position + new Vector3(0f, 1f, 0f) + position / 2f, (position + new Vector3(0f, 0.2f, 0f)) * 8f);
+                    inventory.containerWear.FindItemsByItemID(items, itemId);
+                }
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    items[i].Drop(player.GetDropPosition(), player.GetDropVelocity());
                 }
             }
         }
@@ -453,32 +509,24 @@ namespace Oxide.Game.Rust.Libraries
         /// <param name="item"></param>
         public void DropItem(BasePlayer player, global::Item item)
         {
-            Vector3 position = player.transform.position;
+            if (item == null)
+            {
+                return;
+            }
+
+            ItemContainer container = item.parent;
+            if (container == null)
+            {
+                return;
+            }
+
             PlayerInventory inventory = Inventory(player);
-            for (int s = 0; s < inventory.containerMain.capacity; s++)
+            if (container != inventory.containerMain && container != inventory.containerBelt && container != inventory.containerWear)
             {
-                global::Item i = inventory.containerMain.GetSlot(s);
-                if (i == item)
-                {
-                    i.Drop(position + new Vector3(0f, 1f, 0f) + position / 2f, (position + new Vector3(0f, 0.2f, 0f)) * 8f);
-                }
+                return;
             }
-            for (int s = 0; s < inventory.containerBelt.capacity; s++)
-            {
-                global::Item i = inventory.containerBelt.GetSlot(s);
-                if (i == item)
-                {
-                    i.Drop(position + new Vector3(0f, 1f, 0f) + position / 2f, (position + new Vector3(0f, 0.2f, 0f)) * 8f);
-                }
-            }
-            for (int s = 0; s < inventory.containerWear.capacity; s++)
-            {
-                global::Item i = inventory.containerWear.GetSlot(s);
-                if (i == item)
-                {
-                    i.Drop(position + new Vector3(0f, 1f, 0f) + position / 2f, (position + new Vector3(0f, 0.2f, 0f)) * 8f);
-                }
-            }
+
+            item.Drop(player.GetDropPosition(), player.GetDropVelocity());
         }
 
         /// <summary>

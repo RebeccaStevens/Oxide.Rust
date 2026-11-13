@@ -1,8 +1,9 @@
-﻿using Oxide.Core;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using Oxide.Core;
 using Oxide.Core.Libraries.Covalence;
 using Oxide.Core.Plugins;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace Oxide.Game.Rust
 {
@@ -84,7 +85,7 @@ namespace Oxide.Game.Rust
                     permission.UpdateNickname(userId, name);
                 }
 
-                if (permission.UserHasPermission(name, perm))
+                if (permission.GetUserData(userId).Perms.Contains(perm))
                 {
                     player.Reply(string.Format(lang.GetMessage("PlayerAlreadyHasPermission", this, player.Id), userId, perm));
                     return;
@@ -223,22 +224,26 @@ namespace Oxide.Game.Rust
                 return;
             }
 
+            string languageName = args[0];
+            try
+            {
+                languageName = new CultureInfo(languageName)?.TwoLetterISOLanguageName;
+            }
+            catch (CultureNotFoundException)
+            {
+                player.Reply(lang.GetMessage("InvalidLanguageName", this, player.Id), languageName);
+                return;
+            }
+
             if (player.IsServer)
             {
-                // TODO: Check if language exists before setting, warn if not
-                lang.SetServerLanguage(args[0]);
+                lang.SetServerLanguage(languageName);
                 player.Reply(string.Format(lang.GetMessage("ServerLanguage", this, player.Id), lang.GetServerLanguage()));
             }
             else
             {
-                // TODO: Check if language exists before setting, warn if not
-                string[] languages = lang.GetLanguages();
-                if (languages.Contains(args[0]))
-                {
-                    lang.SetLanguage(args[0], player.Id);
-                }
-
-                player.Reply(string.Format(lang.GetMessage("PlayerLanguage", this, player.Id), args[0]));
+                lang.SetLanguage(languageName, player.Id);
+                player.Reply(string.Format(lang.GetMessage("PlayerLanguage", this, player.Id), languageName));
             }
         }
 
@@ -314,7 +319,7 @@ namespace Oxide.Game.Rust
             int number = 1;
             foreach (Plugin plugin in loadedPlugins.Where(p => p.Filename != null))
             {
-                output += $"\n  {number++:00} \"{plugin.Title}\" ({plugin.Version}) by {plugin.Author} ({plugin.TotalHookTime:0.00}s) - {plugin.Filename.Basename()}";
+                output += $"\n  {number++:00} \"{plugin.Title}\" ({plugin.Version}) by {plugin.Author} ({plugin.TotalHookTime:0.00}s / {FormatBytes(plugin.TotalHookMemory)}) - {plugin.Filename.Basename()}";
             }
 
             foreach (string pluginName in unloadedPluginErrors.Keys)
@@ -323,6 +328,26 @@ namespace Oxide.Game.Rust
             }
 
             player.Reply(output);
+        }
+
+        private static string FormatBytes(long bytes)
+        {
+            if (bytes < 1024)
+            {
+                return $"{bytes:0} B";
+            }
+
+            if (bytes < 1048576)
+            {
+                return $"{bytes / 1024:0} KB";
+            }
+
+            if (bytes < 1073741824)
+            {
+                return $"{bytes / 1048576:0} MB";
+            }
+
+            return $"{bytes / 1073741824:0} GB";
         }
 
         #endregion Plugins Command
@@ -395,7 +420,7 @@ namespace Oxide.Game.Rust
                     return;
                 }
 
-                if (!permission.GroupHasPermission(name, perm))
+                if (!perm.EndsWith("*") && !permission.GroupHasPermission(name, perm))
                 {
                     // TODO: Check if group is inheriting permission, mention
                     player.Reply(string.Format(lang.GetMessage("GroupDoesNotHavePermission", this, player.Id), name, perm));
@@ -429,7 +454,7 @@ namespace Oxide.Game.Rust
                     permission.UpdateNickname(userId, name);
                 }
 
-                if (!permission.UserHasPermission(userId, perm))
+                if (!perm.EndsWith("*") && !permission.UserHasPermission(userId, perm))
                 {
                     // TODO: Check if user is inheriting permission, mention
                     player.Reply(string.Format(lang.GetMessage("PlayerDoesNotHavePermission", this, player.Id), name, perm));
@@ -701,7 +726,8 @@ namespace Oxide.Game.Rust
         {
             if (player.IsServer)
             {
-                player.Reply("Oxide.Rust Version: " + RustExtension.AssemblyVersion);
+                string format = "Oxide.Rust Version: {0}\nOxide.Rust Branch: {1}";
+                player.Reply(string.Format(format, RustExtension.AssemblyVersion, Extension.Branch));
             }
             else
             {

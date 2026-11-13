@@ -1,9 +1,9 @@
-﻿using Network;
-using Oxide.Core;
-using Oxide.Core.Libraries;
 using System;
 using System.Linq;
 using System.Reflection;
+using Network;
+using Oxide.Core;
+using Oxide.Core.Libraries;
 
 namespace Oxide.Game.Rust.Libraries
 {
@@ -113,7 +113,7 @@ namespace Oxide.Game.Rust.Libraries
         [LibraryFunction("UserIDsFromBuildingPrivilege")]
         public Array UserIDsFromBuildingPrivlidge(BuildingPrivlidge priv)
         {
-            return priv.authorizedPlayers.Select(eid => eid.userid.ToString()).ToArray();
+            return priv.authorizedPlayers.Select(playerId => playerId.ToString()).ToArray();
         }
 
         /// <summary>

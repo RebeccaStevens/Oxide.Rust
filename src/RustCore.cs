@@ -1,14 +1,14 @@
-﻿using Oxide.Core;
-using Oxide.Core.Libraries;
-using Oxide.Core.Libraries.Covalence;
-using Oxide.Core.Plugins;
-using Oxide.Game.Rust.Libraries;
-using Oxide.Game.Rust.Libraries.Covalence;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using Oxide.Core;
+using Oxide.Core.Libraries;
+using Oxide.Core.Libraries.Covalence;
+using Oxide.Core.Plugins;
+using Oxide.Game.Rust.Libraries;
+using Oxide.Game.Rust.Libraries.Covalence;
 using UnityEngine;
 
 namespace Oxide.Game.Rust
@@ -26,9 +26,10 @@ namespace Oxide.Game.Rust
         public RustCore()
         {
             // Set plugin info attributes
+            Extension = Interface.Oxide.GetExtension<RustExtension>();
             Title = "Rust";
-            Author = RustExtension.AssemblyAuthors;
-            Version = RustExtension.AssemblyVersion;
+            Author = Extension.Author;
+            Version = Extension.Version;
         }
 
         // Libraries
@@ -41,6 +42,7 @@ namespace Oxide.Game.Rust
         internal static readonly RustCovalenceProvider Covalence = RustCovalenceProvider.Instance;
         internal readonly PluginManager pluginManager = Interface.Oxide.RootPluginManager;
         internal readonly IServer Server = Covalence.CreateServer();
+        internal readonly RustExtension Extension;
 
         // Commands that a plugin can't override
         internal static IEnumerable<string> RestrictedCommands => new[]

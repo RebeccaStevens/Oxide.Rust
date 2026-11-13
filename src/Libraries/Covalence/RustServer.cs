@@ -1,10 +1,10 @@
-using Facepunch;
-using Oxide.Core;
-using Oxide.Core.Libraries.Covalence;
 using System;
 using System.Globalization;
 using System.IO;
 using System.Net;
+using Facepunch;
+using Oxide.Core;
+using Oxide.Core.Libraries.Covalence;
 using Utility = Oxide.Core.Utility;
 
 namespace Oxide.Game.Rust.Libraries.Covalence
@@ -147,11 +147,19 @@ namespace Oxide.Game.Rust.Libraries.Covalence
         /// <param name="duration"></param>
         public void Ban(string id, string reason, TimeSpan duration = default)
         {
-            if (!IsBanned(id))
+            if (IsBanned(id))
             {
-                ServerUsers.Set(ulong.Parse(id), ServerUsers.UserGroup.Banned, Name, reason);
-                ServerUsers.Save();
+                return;
             }
+
+            long expiryUnixTime = -1L;
+            if (duration != TimeSpan.Zero)
+            {
+                DateTime expiryTime = DateTime.UtcNow.Add(duration);
+                expiryUnixTime = new DateTimeOffset(expiryTime).ToUnixTimeSeconds();
+            }
+            ServerUsers.Set(ulong.Parse(id), ServerUsers.UserGroup.Banned, Name, reason, expiryUnixTime);
+            ServerUsers.Save();
         }
 
         /// <summary>

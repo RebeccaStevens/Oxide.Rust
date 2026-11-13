@@ -1,8 +1,8 @@
+using System;
+using System.Reflection;
 using Oxide.Core;
 using Oxide.Core.Plugins;
 using Oxide.Game.Rust.Libraries;
-using System;
-using System.Reflection;
 using UnityEngine;
 
 namespace Oxide.Plugins
@@ -246,7 +246,7 @@ namespace Oxide.Plugins
 
             if (!player.IsSpectating() || Vector3.Distance(player.transform.position, destination) > 25.0)
             {
-                player.ClientRPCPlayer(null, player, "ForcePositionTo", destination);
+                player.ClientRPC(RpcTarget.Player("ForcePositionTo", player), destination);
             }
             else
             {

@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8" ?>
 <Project>
   <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
   <PropertyGroup>
@@ -20,6 +20,8 @@
     <GameExe>RustDedicated.exe;RustDedicated</GameExe>
     <ManagedDir>RustDedicated_Data/Managed</ManagedDir>
     <NoWarn>NU1701</NoWarn>
+    <GitBranch />
+    <ReferencesOverride>regex:Managed/(.*).dll</ReferencesOverride>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Oxide.References" Version="2.0.*" />
@@ -30,15 +32,21 @@
     <PackageReference Include="Oxide.Unity" Version="2.0.*" />
     <Reference Include="Assembly-CSharp" />
     <Reference Include="Assembly-CSharp-firstpass" />
+    <Reference Include="BoomlagoonJSON" />
     <Reference Include="Facepunch.Console" />
     <Reference Include="Facepunch.Network" />
     <Reference Include="Facepunch.Rcon" />
+    <Reference Include="Facepunch.Sqlite" />
     <Reference Include="Facepunch.System" />
     <Reference Include="Facepunch.Unity" />
     <Reference Include="Facepunch.UnityEngine" />
     <Reference Include="Fleck" />
-    <Reference Include="mscorlib" />
-    <Reference Include="NewAssembly" />
+    <Reference Include="mscorlib">
+      <HintPath>Dependencies\$(TargetPlatform)\$(ManagedDir)\mscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Rust.Clans" />
+    <Reference Include="Rust.Clans.Local" />
     <Reference Include="Rust.Data" />
     <Reference Include="Rust.Global" />
     <Reference Include="Rust.Platform.Common" />
@@ -54,8 +62,21 @@
     <None Remove="Bundle\**; dependencies\**; *.config; *.opj" />
   </ItemGroup>
   <ItemGroup>
-    <PatchedFiles Include="$(TargetDir)\Assembly-CSharp.dll; $(TargetDir)\Facepunch.Console.dll; $(TargetDir)\Facepunch.Network.dll; $(TargetDir)\Facepunch.Rcon.dll; $(TargetDir)\Facepunch.UnityEngine.dll; $(TargetDir)\NewAssembly.dll" />
+    <PatchedFiles
+      Include="$(TargetDir)\Assembly-CSharp.dll; $(TargetDir)\Facepunch.Console.dll; $(TargetDir)\Facepunch.Network.dll; $(TargetDir)\Facepunch.Rcon.dll; $(TargetDir)\Facepunch.Sqlite.dll; $(TargetDir)\Facepunch.UnityEngine.dll; $(TargetDir)\Rust.Clans.Local.dll"
+    />
   </ItemGroup>
+  <Target Name="AddGitBranchMeta" BeforeTargets="CoreGenerateAssemblyInfo">
+    <Exec Command="git name-rev --name-only HEAD" WorkingDirectory="$(MSBuildProjectDirectory)" ConsoleToMSBuild="True">
+      <Output TaskParameter="ConsoleOutput" PropertyName="GitBranch" />
+    </Exec>
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute" Condition="$(GitBranch) != ''">
+        <_Parameter1>GitBranch</_Parameter1>
+        <_Parameter2>$(GitBranch)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
   <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
   <Import Project="..\Game.targets" />
 </Project>

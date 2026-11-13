@@ -1,0 +1,97 @@
+name: Build and Create Release
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Release note'
+        required: true
+
+jobs:
+  build:
+    name: Run Build
+    uses: OxideMod/Actions/.github/workflows/game-build.yml@main
+    with:
+      game: "Rust"
+    secrets:
+      DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      REPO_ACCESS_TOKEN: ${{ secrets.REPO_ACCESS_TOKEN }}
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Generate Changelog
+        uses: orhun/git-cliff-action@v4
+        id: changelog
+        with:
+          config: .github/cliff.toml
+          args: --unreleased --tag ${{ needs.build.outputs.version }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}
+          path: artifacts
+
+      - name: Deploy to GitHub Releases
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/Oxide.*.zip
+          tag_name: ${{ needs.build.outputs.version }}
+          fail_on_unmatched_files: true
+          target_commitish: ${{ github.sha }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: ${{ steps.changelog.outputs.content }}
+
+  deploy:
+    name: Deploy to R2
+    uses: OxideMod/Actions/.github/workflows/r2-publish.yml@main
+    needs: build
+    with:
+      generate-filehash: true
+      CLOUDFLARE_R2_PUBLIC_URL_BASE: ${{ vars.CLOUDFLARE_R2_PUBLIC_URL_BASE }}
+    secrets:
+      CLOUDFLARE_R2_KEY: ${{ secrets.CLOUDFLARE_R2_KEY }}
+      CLOUDFLARE_R2_SECRET: ${{ secrets.CLOUDFLARE_R2_SECRET }}
+      CLOUDFLARE_R2_ENDPOINT: ${{ secrets.CLOUDFLARE_R2_ENDPOINT }}
+      CLOUDFLARE_ZONE_ID: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+  update-docs:
+    name: Update Documentation
+    runs-on: ubuntu-22.04
+    needs: build
+    steps:
+      - name: Checkout Docs Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/Oxide.Docs
+          token: ${{ secrets.REPO_ACCESS_TOKEN }}
+          ref: main
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ github.event.repository.name }}-docs
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.email github@oxidemod.com
+          git config --global user.name oxidemod-bot
+          git add docs.json
+          git diff-index --quiet HEAD || git commit -m "Update hooks index to ${{ needs.build.outputs.version }}"
+          git push
